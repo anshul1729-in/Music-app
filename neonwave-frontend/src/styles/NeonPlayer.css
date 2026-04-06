@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Rajdhani:wght@300;400;500;600&display=swap');
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--theme-bg); overflow: hidden; }
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--theme-surface); }
+::-webkit-scrollbar-thumb { background: var(--theme-accent-44); border-radius: 2px; }
+input[type=range] { -webkit-appearance: none; appearance: none; background: transparent; cursor: pointer; }
+input[type=range]::-webkit-slider-track { height: 3px; background: var(--theme-border); border-radius: 2px; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--theme-accent); margin-top: -4.5px; box-shadow: 0 0 8px var(--theme-accent-aa); }
+input[type=range]:focus { outline: none; }
+.track-row:hover { background: var(--theme-accent-11) !important; }
+.track-row.active { background: var(--theme-accent-18) !important; }
+.ctrl-btn { transition: all 0.15s; }
+.ctrl-btn:hover { color: var(--theme-accent) !important; filter: drop-shadow(0 0 8px var(--theme-accent)); }
+.ctrl-btn.active { color: var(--theme-accent) !important; filter: drop-shadow(0 0 8px var(--theme-accent)); }
+.play-btn:hover { box-shadow: 0 0 30px var(--theme-accent-88), 0 0 60px var(--theme-accent-33) !important; transform: scale(1.05); }
+.theme-btn:hover { border-color: var(--theme-accent) !important; color: var(--theme-accent) !important; }
+.upload-btn:hover { background: var(--theme-accent-22) !important; border-color: var(--theme-accent-88) !important; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform: translateY(0); } }
+.fadeIn { animation: fadeIn 0.3s ease; }
+.vinyl { animation: spin 4s linear infinite; }
+.vinyl.playing { animation-play-state: running; }
+.vinyl.paused { animation-play-state: paused; }
