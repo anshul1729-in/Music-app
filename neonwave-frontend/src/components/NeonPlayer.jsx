@@ -270,7 +270,7 @@ export default function NeonPlayer() {
 
   return (
     <>
-      <audio ref={audioRef} />
+      <audio ref={audioRef} crossOrigin="anonymous" />
       <input
         ref={fileInputRef}
         type="file"
