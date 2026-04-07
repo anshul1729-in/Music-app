@@ -7,35 +7,11 @@ import {
 import Visualizer from "./Visualizer";
 import AlbumArt from "./AlbumArt";
 import api from "../api";
-
-const THEMES = {
-  neon: {
-    bg: "#080810",
-    surface: "#0d0d1a",
-    card: "#111128",
-    border: "#1a1a3a",
-    accent: "#00f5ff",
-    accent2: "#a855f7",
-    accent3: "#ff006e",
-    text: "#e0e8ff",
-    muted: "#4a4a7a",
-    glow: "0 0 20px #00f5ff55, 0 0 40px #00f5ff22",
-    glowPurple: "0 0 20px #a855f755, 0 0 40px #a855f722",
-  },
-  moody: {
-    bg: "#060609",
-    surface: "#0c0c14",
-    card: "#10101c",
-    border: "#1c1c2e",
-    accent: "#7c3aed",
-    accent2: "#ec4899",
-    accent3: "#f59e0b",
-    text: "#d4d4f0",
-    muted: "#3a3a5a",
-    glow: "0 0 20px #7c3aed55, 0 0 40px #7c3aed22",
-    glowPurple: "0 0 20px #ec489955, 0 0 40px #ec489922",
-  },
-};
+import { useTheme } from "../contexts/ThemeContext";
+import { useQueue } from "../contexts/QueueContext";
+import ThemeSwitcher from "./ThemeSwitcher";
+import QueuePanel from "./QueuePanel";
+import PlaylistPanel from "./PlaylistPanel";
 
 const formatTime = (s) => {
   if (isNaN(s)) return "0:00";
@@ -45,47 +21,58 @@ const formatTime = (s) => {
 };
 
 export default function NeonPlayer() {
-  const [themeName, setThemeName] = useState("neon");
-  const theme = THEMES[themeName];
+  const { theme } = useTheme();
 
-  useEffect(() => {
-    document.documentElement.style.setProperty('--theme-bg', theme.bg);
-    document.documentElement.style.setProperty('--theme-surface', theme.surface);
-    document.documentElement.style.setProperty('--theme-card', theme.card);
-    document.documentElement.style.setProperty('--theme-border', theme.border);
-    document.documentElement.style.setProperty('--theme-accent', theme.accent);
-    document.documentElement.style.setProperty('--theme-accent-44', theme.accent + "44");
-    document.documentElement.style.setProperty('--theme-accent-aa', theme.accent + "aa");
-    document.documentElement.style.setProperty('--theme-accent-11', theme.accent + "11");
-    document.documentElement.style.setProperty('--theme-accent-18', theme.accent + "18");
-    document.documentElement.style.setProperty('--theme-accent-33', theme.accent + "33");
-    document.documentElement.style.setProperty('--theme-accent-88', theme.accent + "88");
-    document.documentElement.style.setProperty('--theme-accent-22', theme.accent + "22");
-  }, [theme]);
+  const t = theme || {};
+  const th = {
+    bg:         t.vars?.["--bg"]         || "#060612",
+    surface:    t.vars?.["--surface"]    || "#0d0d24",
+    card:       t.vars?.["--bg3"]        || "#12122e",
+    border:     t.vars?.["--border"]     || "rgba(0,245,255,0.12)",
+    accent:     t.vars?.["--accent"]     || "#00f5ff",
+    accent2:    t.vars?.["--accent2"]    || "#b44eff",
+    accent3:    t.vars?.["--accent3"]    || "#ff2d78",
+    text:       t.vars?.["--text"]       || "#c8d0e8",
+    muted:      t.vars?.["--text-dim"]   || "#5a6a8a",
+    glow:       t.vars?.["--glow"]       || "0 0 20px rgba(0,245,255,0.4)",
+    glowPurple: t.vars?.["--glow2"]      || "0 0 20px rgba(180,78,255,0.4)",
+  };
 
-  const [library, setLibrary] = useState([]);
-  const [queue, setQueue] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.8);
-  const [shuffle, setShuffle] = useState(false);
-  const [repeat, setRepeat] = useState(false);
-  const [view, setView] = useState("library");
-  const [gridView, setGridView] = useState(false);
-  const [search, setSearch] = useState("");
-  const [analyser, setAnalyser] = useState(null);
+  const {
+    queue: ctxQueue,
+    queueIndex,
+    currentTrack,
+    shuffled,
+    repeat,
+    loadQueue,
+    jumpTo,
+    goToNext,
+    goToPrev,
+    toggleShuffle,
+    cycleRepeat,
+    setQueueOpen,
+    setPlaylistOpen,
+  } = useQueue();
 
-  const audioRef = useRef(null);
+  const [library, setLibrary]         = useState([]);
+  const [isPlaying, setIsPlaying]     = useState(false);
+  const [progress, setProgress]       = useState(0);
+  const [duration, setDuration]       = useState(0);
+  const [volume, setVolume]           = useState(0.8);
+  const [view, setView]               = useState("library");
+  const [gridView, setGridView]       = useState(false);
+  const [search, setSearch]           = useState("");
+  const [analyser, setAnalyser]       = useState(null);
+  const [mobilePlayerOpen, setMobilePlayerOpen] = useState(false);
+
+  const audioRef    = useRef(null);
   const audioCtxRef = useRef(null);
-  const sourceRef = useRef(null);
+  const sourceRef   = useRef(null);
   const analyserRef = useRef(null);
   const fileInputRef = useRef(null);
-  const dropRef = useRef(null);
+  const dropRef      = useRef(null);
 
-  const currentTrack = queue[currentIndex] || null;
-
+  // ── Audio Context ─────────────────────────────────────────────────────────
   const setupAudioContext = useCallback((audio) => {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -98,9 +85,7 @@ export default function NeonPlayer() {
       analyserRef.current.connect(ctx.destination);
       setAnalyser(analyserRef.current);
     }
-    if (sourceRef.current) {
-      try { sourceRef.current.disconnect(); } catch {}
-    }
+    if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch {} }
     sourceRef.current = ctx.createMediaElementSource(audio);
     sourceRef.current.connect(analyserRef.current);
   }, []);
@@ -108,7 +93,6 @@ export default function NeonPlayer() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
-
     audio.src = api.getStreamUrl(currentTrack.id);
     audio.volume = volume;
     if (isPlaying) {
@@ -139,13 +123,10 @@ export default function NeonPlayer() {
   const playTrack = (index) => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (index === currentIndex && currentTrack) {
-      togglePlay();
-      return;
-    }
-    setCurrentIndex(index);
+    if (index === queueIndex && currentTrack) { togglePlay(); return; }
+    jumpTo(index);
     setIsPlaying(true);
-    const track = queue[index];
+    const track = ctxQueue[index];
     if (!track) return;
     audio.src = api.getStreamUrl(track.id);
     if (!audioCtxRef.current) setupAudioContext(audio);
@@ -158,56 +139,64 @@ export default function NeonPlayer() {
     audio.play().then(() => setIsPlaying(true)).catch(() => {});
   };
 
-  const skipNext = () => {
-    if (!queue.length) return;
-    const next = shuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex + 1) % queue.length;
-    playTrack(next);
+  const doSkipNext = () => {
+    const result = goToNext();
+    if (!result) return;
+    const audio = audioRef.current;
+    const track = result.track;
+    if (!track || !audio) return;
+    audio.src = api.getStreamUrl(track.id);
+    if (audioCtxRef.current) {
+      if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch {} }
+      sourceRef.current = audioCtxRef.current.createMediaElementSource(audio);
+      sourceRef.current.connect(analyserRef.current);
+    }
+    audio.play().then(() => setIsPlaying(true)).catch(() => {});
   };
 
-  const skipPrev = () => {
+  const doSkipPrev = () => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) { audio.currentTime = 0; return; }
-    if (!queue.length) return;
-    const prev = shuffle
-      ? Math.floor(Math.random() * queue.length)
-      : (currentIndex - 1 + queue.length) % queue.length;
-    playTrack(prev);
+    const result = goToPrev();
+    if (!result) return;
+    const track = result.track;
+    if (!track || !audio) return;
+    audio.src = api.getStreamUrl(track.id);
+    if (audioCtxRef.current) {
+      if (sourceRef.current) { try { sourceRef.current.disconnect(); } catch {} }
+      sourceRef.current = audioCtxRef.current.createMediaElementSource(audio);
+      sourceRef.current.connect(analyserRef.current);
+    }
+    audio.play().then(() => setIsPlaying(true)).catch(() => {});
   };
 
   useEffect(() => {
-    // Initial fetch of library from backend
     api.getTracks().then(({ tracks }) => {
-      // Map 'title' to 'name' so it connects cleanly with your existing UI
       const mapped = tracks.map(t => ({ ...t, name: t.title }));
       setLibrary(mapped);
-      setQueue(mapped);
+      loadQueue(mapped, 0);
     }).catch(console.error);
   }, []);
 
   const handleFiles = async (files) => {
-    const audioFiles = Array.from(files).filter((f) => f.type.startsWith("audio/"));
+    const audioFiles = Array.from(files).filter(f => f.type.startsWith("audio/"));
     if (!audioFiles.length) return;
-    
     try {
       const uploaded = await api.uploadTracks(audioFiles);
       const mapped = uploaded.map(t => ({ ...t, name: t.title }));
-      setLibrary((prev) => {
+      setLibrary(prev => {
         const updated = [...prev, ...mapped];
-        setQueue(updated);
+        loadQueue(updated, queueIndex);
         return updated;
       });
-    } catch (e) {
-      console.error("Upload error", e);
-    }
+    } catch (e) { console.error("Upload error", e); }
   };
 
   useEffect(() => {
     const drop = dropRef.current;
     if (!drop) return;
-    const prevent = (e) => { e.preventDefault(); e.stopPropagation(); };
-    const onDrop = (e) => { prevent(e); handleFiles(e.dataTransfer.files); };
+    const prevent = e => { e.preventDefault(); e.stopPropagation(); };
+    const onDrop = e => { prevent(e); handleFiles(e.dataTransfer.files); };
     drop.addEventListener("dragover", prevent);
     drop.addEventListener("drop", onDrop);
     return () => { drop.removeEventListener("dragover", prevent); drop.removeEventListener("drop", onDrop); };
@@ -216,14 +205,11 @@ export default function NeonPlayer() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const onTime = () => setProgress(audio.currentTime);
+    const onTime     = () => setProgress(audio.currentTime);
     const onDuration = () => setDuration(audio.duration);
-    const onEnded = () => {
-      if (repeat) { audio.currentTime = 0; audio.play(); }
-      else skipNext();
-    };
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const onEnded    = () => doSkipNext();
+    const onPlay     = () => setIsPlaying(true);
+    const onPause    = () => setIsPlaying(false);
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("loadedmetadata", onDuration);
     audio.addEventListener("ended", onEnded);
@@ -236,7 +222,7 @@ export default function NeonPlayer() {
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
     };
-  }, [currentIndex, repeat, shuffle]);
+  }, [queueIndex, repeat, shuffled]);
 
   const seek = (e) => {
     const audio = audioRef.current;
@@ -249,487 +235,440 @@ export default function NeonPlayer() {
   const removeTrack = async (id) => {
     try {
       await api.deleteTrack(id);
-      setLibrary((prev) => {
-        const updated = prev.filter((t) => t.id !== id);
-        setQueue(updated);
-        if (updated.length === 0) { setIsPlaying(false); setCurrentIndex(0); }
+      setLibrary(prev => {
+        const updated = prev.filter(t => t.id !== id);
+        loadQueue(updated, Math.min(queueIndex, Math.max(0, updated.length - 1)));
+        if (!updated.length) setIsPlaying(false);
         return updated;
       });
-    } catch (e) {
-      console.error("Error deleting track", e);
-    }
+    } catch (e) { console.error("Error deleting track", e); }
   };
 
-  const filtered = library.filter(
-    (t) =>
-      t.name.toLowerCase().includes(search.toLowerCase()) ||
-      t.artist.toLowerCase().includes(search.toLowerCase())
+  const filtered = library.filter(t =>
+    (t.name||"").toLowerCase().includes(search.toLowerCase()) ||
+    (t.artist||"").toLowerCase().includes(search.toLowerCase())
+  );
+  const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
+
+  // ── Shared control bar (used in sidebar and mobile expanded view) ─────────
+  const ControlBar = ({ compact = false }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: compact ? 12 : 16 }}>
+      <button onClick={toggleShuffle} className={`ctrl-btn ${shuffled ? "active" : ""}`}
+        style={{ background: "none", border: "none", color: shuffled ? th.accent : th.muted, cursor: "pointer", padding: 4 }}>
+        <ShuffleIcon size={compact ? 14 : 16} />
+      </button>
+      <button onClick={doSkipPrev} className="ctrl-btn"
+        style={{ background: "none", border: "none", color: th.text, cursor: "pointer", padding: 4 }}>
+        <SkipPrev size={compact ? 20 : 22} />
+      </button>
+      <button onClick={togglePlay} className="play-btn" style={{
+        width: compact ? 46 : 52, height: compact ? 46 : 52, borderRadius: "50%",
+        background: `linear-gradient(135deg, ${th.accent}, ${th.accent2})`,
+        border: "none", color: "#fff", cursor: "pointer",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        boxShadow: th.glow, transition: "all 0.2s",
+      }}>
+        {isPlaying ? <PauseIcon size={compact ? 20 : 22} /> : <PlayIcon size={compact ? 20 : 22} />}
+      </button>
+      <button onClick={doSkipNext} className="ctrl-btn"
+        style={{ background: "none", border: "none", color: th.text, cursor: "pointer", padding: 4 }}>
+        <SkipNext size={compact ? 20 : 22} />
+      </button>
+      <button onClick={cycleRepeat} className={`ctrl-btn ${repeat !== "none" ? "active" : ""}`}
+        style={{ background: "none", border: "none", color: repeat !== "none" ? th.accent : th.muted, cursor: "pointer", padding: 4 }}>
+        {repeat === "one"
+          ? <span style={{ fontSize: 10, fontFamily: "var(--font-display,monospace)", letterSpacing: 1 }}>↺1</span>
+          : <RepeatIcon size={compact ? 14 : 16} />}
+      </button>
+    </div>
   );
 
-  const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
+  // ── Track list (reused in library view) ──────────────────────────────────
+  const TrackList = () => (
+    <div className="fadeIn">
+      {library.length === 0 ? (
+        <div className="nw-empty-state">
+          <div className="nw-empty-icon"><MusicIcon size={32} /></div>
+          <div>
+            <div className="nw-empty-title">YOUR LIBRARY IS EMPTY</div>
+            <div className="nw-empty-sub">Drop audio files here or click Add Music</div>
+          </div>
+          <button onClick={() => fileInputRef.current.click()} className="nw-upload-cta"
+            style={{ background: `linear-gradient(135deg, ${th.accent}33, ${th.accent2}33)`, border: `1px solid ${th.accent}66`, color: th.accent }}>
+            UPLOAD MUSIC
+          </button>
+        </div>
+      ) : gridView ? (
+        <div className="nw-grid">
+          {filtered.map(track => (
+            <div key={track.id} className="nw-grid-card"
+              onClick={() => { loadQueue(library, library.indexOf(track)); setIsPlaying(true); }}
+              style={{
+                background: currentTrack?.id === track.id ? th.accent + "18" : th.card,
+                border: `1px solid ${currentTrack?.id === track.id ? th.accent + "66" : th.border}`,
+              }}>
+              <AlbumArt song={track} theme={th} size={150} />
+              <div style={{ padding: "8px 10px" }}>
+                <div className="nw-grid-title" style={{ color: th.text }}>{track.name || track.title}</div>
+                <div className="nw-grid-artist" style={{ color: th.muted }}>{track.artist}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <table className="nw-table">
+          <thead>
+            <tr style={{ borderBottom: `1px solid ${th.border}` }}>
+              {["#","TITLE","ARTIST",""].map((h, i) => (
+                <th key={i} className="nw-th" style={{ color: th.muted, width: i === 0 ? 40 : i === 3 ? 40 : "auto" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((track, idx) => {
+              const isActive = currentTrack?.id === track.id;
+              return (
+                <tr key={track.id}
+                  className={`track-row ${isActive ? "active" : ""}`}
+                  onClick={() => { loadQueue(library, library.indexOf(track)); setIsPlaying(true); }}
+                  style={{
+                    background: isActive ? th.accent + "18" : "transparent",
+                    cursor: "pointer", transition: "background 0.15s",
+                    borderBottom: `1px solid ${th.border}22`,
+                  }}>
+                  <td className="nw-td" style={{ width: 40 }}>
+                    {isActive && isPlaying ? (
+                      <div className="nw-bars">
+                        {[1,1.5,0.8].map((d,j) => <div key={j} style={{ width:3, background:th.accent, borderRadius:1, animation:`pulse ${d}s ease-in-out infinite`, height:[10,14,8][j] }} />)}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize:12, color: isActive ? th.accent : th.muted, letterSpacing:1 }}>{String(idx+1).padStart(2,"0")}</span>
+                    )}
+                  </td>
+                  <td className="nw-td">
+                    <span style={{ fontSize:14, fontWeight:500, color: isActive ? th.accent : th.text }}>{track.name || track.title}</span>
+                  </td>
+                  <td className="nw-td nw-td-artist">
+                    <span style={{ fontSize:13, color:th.muted }}>{track.artist}</span>
+                  </td>
+                  <td className="nw-td" style={{ width:40 }}>
+                    <button onClick={e => { e.stopPropagation(); removeTrack(track.id); }}
+                      className="nw-delete-btn"
+                      style={{ color:th.muted }}
+                      onMouseEnter={e => { e.currentTarget.style.color = th.accent3; e.currentTarget.style.opacity = 1; }}
+                      onMouseLeave={e => { e.currentTarget.style.color = th.muted; e.currentTarget.style.opacity = 0.5; }}>
+                      <TrashIcon size={14} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
 
   return (
     <>
       <audio ref={audioRef} crossOrigin="anonymous" />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="audio/*"
-        multiple
-        style={{ display: "none" }}
-        onChange={(e) => handleFiles(e.target.files)}
-      />
+      <input ref={fileInputRef} type="file" accept="audio/*" multiple style={{ display:"none" }}
+        onChange={e => handleFiles(e.target.files)} />
 
-      <div
-        ref={dropRef}
-        style={{
-          fontFamily: "'Rajdhani', sans-serif",
-          background: theme.bg,
-          minHeight: "100vh",
-          color: theme.text,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "16px 24px",
-          borderBottom: `1px solid ${theme.border}`,
-          background: theme.surface,
-          position: "sticky", top: 0, zIndex: 50,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8,
-              background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent2})`,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              boxShadow: theme.glow,
-            }}>
+      {/* Phase 3 slide-in panels */}
+      <QueuePanel />
+      <PlaylistPanel currentTrack={currentTrack} />
+
+      {/* ── Mobile expanded player overlay ─────────────────────────────── */}
+      {mobilePlayerOpen && (
+        <div className="nw-mobile-expanded" style={{ background: th.bg }}>
+          {/* Header */}
+          <div className="nw-mob-exp-header" style={{ borderBottom: `1px solid ${th.border}` }}>
+            <button onClick={() => setMobilePlayerOpen(false)} className="nw-mob-back"
+              style={{ color: th.muted }}>
+              ↓
+            </button>
+            <span style={{ fontFamily:"var(--font-display,'Orbitron',monospace)", fontSize:11, letterSpacing:3, color:th.muted }}>NOW PLAYING</span>
+            <ThemeSwitcher />
+          </div>
+
+          {/* Album art */}
+          <div className="nw-mob-art" style={{ boxShadow: th.glow }}>
+            <div className={`vinyl ${isPlaying ? "playing" : "paused"}`} style={{ borderRadius:20 }}>
+              <AlbumArt song={currentTrack} theme={th} size={280} />
+            </div>
+          </div>
+
+          {/* Track info */}
+          <div className="nw-mob-info">
+            <div className="nw-mob-title" style={{ color: th.text }}>
+              {currentTrack?.name || currentTrack?.title || "NO TRACK LOADED"}
+            </div>
+            <div className="nw-mob-artist" style={{ color: th.accent2 }}>{currentTrack?.artist || "—"}</div>
+          </div>
+
+          {/* Progress */}
+          <div className="nw-mob-progress">
+            <div onClick={seek} className="nw-progress-track" style={{ background: th.border }}>
+              <div style={{
+                height:"100%", width:`${progressPct}%`,
+                background:`linear-gradient(90deg, ${th.accent}, ${th.accent2})`,
+                borderRadius:2, boxShadow:`0 0 8px ${th.accent}88`, transition:"width 0.1s",
+              }} />
+            </div>
+            <div className="nw-progress-times" style={{ color: th.muted }}>
+              <span>{formatTime(progress)}</span><span>{formatTime(duration)}</span>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div style={{ padding: "0 32px" }}>
+            <ControlBar />
+          </div>
+
+          {/* Volume */}
+          <div className="nw-mob-volume">
+            <VolumeIcon size={14} />
+            <input type="range" min="0" max="1" step="0.01" value={volume}
+              onChange={e => setVolume(parseFloat(e.target.value))} style={{ flex:1 }} />
+            <span style={{ fontSize:11, color:th.muted, minWidth:28, textAlign:"right" }}>{Math.round(volume*100)}</span>
+          </div>
+
+          {/* Visualizer */}
+          <div className="nw-mob-visualizer" style={{ background:th.card, border:`1px solid ${th.border}` }}>
+            <Visualizer analyser={analyser} isPlaying={isPlaying} theme={th} />
+          </div>
+
+          {/* Queue / Playlists */}
+          <div className="nw-mob-panel-btns">
+            <button className="nw-panel-btn" onClick={() => setPlaylistOpen(true)}
+              style={{ border:`1px solid ${th.border}`, color:th.muted, background:"transparent" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=th.accent; e.currentTarget.style.color=th.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=th.border; e.currentTarget.style.color=th.muted; }}>
+              ≡ PLAYLISTS
+            </button>
+            <button className="nw-panel-btn" onClick={() => setQueueOpen(true)}
+              style={{ border:`1px solid ${th.border}`, color:th.muted, background:"transparent", position:"relative" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=th.accent; e.currentTarget.style.color=th.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=th.border; e.currentTarget.style.color=th.muted; }}>
+              ♫ QUEUE
+              {ctxQueue.length > 0 && <span className="nw-badge" style={{ background:th.accent, color:th.bg }}>{ctxQueue.length}</span>}
+            </button>
+            <button className="nw-panel-btn" onClick={() => fileInputRef.current.click()}
+              style={{ border:`1px solid ${th.border}`, color:th.muted, background:"transparent" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor=th.accent; e.currentTarget.style.color=th.accent; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=th.border; e.currentTarget.style.color=th.muted; }}>
+              + ADD
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Main App Shell ──────────────────────────────────────────────── */}
+      <div ref={dropRef} className="nw-app" style={{ background: th.bg, color: th.text }}>
+
+        {/* ── Top Bar ─────────────────────────────────────────────────── */}
+        <div className="nw-topbar" style={{ borderBottom:`1px solid ${th.border}`, background:th.surface }}>
+          <div className="nw-logo">
+            <div className="nw-logo-icon" style={{ background:`linear-gradient(135deg, ${th.accent}, ${th.accent2})`, boxShadow:th.glow }}>
               <MusicIcon size={16} />
             </div>
-            <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 16, fontWeight: 700, color: theme.accent, letterSpacing: 2 }}>
-              NEON<span style={{ color: theme.accent2 }}>WAVE</span>
+            <span style={{ fontFamily:"var(--font-display,'Orbitron',monospace)", fontSize:16, fontWeight:700, color:th.accent, letterSpacing:2 }}>
+              NEON<span style={{ color:th.accent2 }}>WAVE</span>
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
-            {["library", "queue"].map((v) => (
-              <button key={v} onClick={() => setView(v)} style={{
-                padding: "6px 16px", borderRadius: 6, border: `1px solid ${view === v ? theme.accent : theme.border}`,
-                background: view === v ? theme.accent + "22" : "transparent",
-                color: view === v ? theme.accent : theme.muted,
-                fontFamily: "'Rajdhani', sans-serif", fontSize: 13, fontWeight: 600,
-                cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
-                transition: "all 0.2s",
-              }}>
+          <div className="nw-view-btns">
+            {["library","queue"].map(v => (
+              <button key={v} onClick={() => setView(v)} className="nw-view-btn"
+                style={{
+                  border:`1px solid ${view===v ? th.accent : th.border}`,
+                  background: view===v ? th.accent+"22" : "transparent",
+                  color: view===v ? th.accent : th.muted,
+                }}>
                 {v}
               </button>
             ))}
           </div>
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {Object.keys(THEMES).map((t) => (
-              <button key={t} onClick={() => setThemeName(t)} className="theme-btn" style={{
-                padding: "5px 12px", borderRadius: 6,
-                border: `1px solid ${themeName === t ? theme.accent : theme.border}`,
-                background: themeName === t ? theme.accent + "22" : "transparent",
-                color: themeName === t ? theme.accent : theme.muted,
-                fontFamily: "'Rajdhani', sans-serif", fontSize: 12, fontWeight: 600,
-                cursor: "pointer", letterSpacing: 1, textTransform: "uppercase", transition: "all 0.2s",
-              }}>
-                {t}
-              </button>
-            ))}
+          <div className="nw-topbar-right">
+            <ThemeSwitcher />
           </div>
         </div>
 
-        <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-          <div style={{
-            width: 280, minWidth: 280, padding: 20,
-            borderRight: `1px solid ${theme.border}`,
-            background: theme.surface,
-            display: "flex", flexDirection: "column", gap: 16,
-            overflowY: "auto",
-          }}>
-            <div style={{ display: "flex", justifyContent: "center", position: "relative" }}>
-              <div className={`vinyl ${isPlaying ? 'playing' : 'paused'}`} style={{
-                borderRadius: 12,
-                boxShadow: currentTrack ? theme.glow : "none",
-                transition: "box-shadow 0.5s",
-              }}>
-                <AlbumArt song={currentTrack} theme={theme} size={220} />
-              </div>
-            </div>
+        {/* ── Body ────────────────────────────────────────────────────── */}
+        <div className="nw-body">
 
-            <div style={{ textAlign: "center" }}>
-              <div style={{
-                fontFamily: "'Orbitron', monospace", fontSize: 14, fontWeight: 600,
-                color: theme.text, marginBottom: 4,
-                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-              }}>
-                {currentTrack?.name || "NO TRACK LOADED"}
+          {/* ── Desktop Sidebar ─────────────────────────────────────── */}
+          <div className="nw-sidebar" style={{ borderRight:`1px solid ${th.border}`, background:th.surface }}>
+            <div className="nw-sidebar-inner">
+              {/* Vinyl art */}
+              <div className="nw-art-wrap">
+                <div className={`vinyl ${isPlaying ? "playing" : "paused"}`}
+                  style={{ borderRadius:12, boxShadow: currentTrack ? th.glow : "none", transition:"box-shadow 0.5s" }}>
+                  <AlbumArt song={currentTrack} theme={th} size={220} />
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: theme.accent2, letterSpacing: 1 }}>
-                {currentTrack?.artist || "—"}
-              </div>
-            </div>
 
-            <div>
-              <div
-                onClick={seek}
-                style={{
-                  height: 4, background: theme.border, borderRadius: 2,
-                  cursor: "pointer", position: "relative", marginBottom: 6,
-                }}
-              >
-                <div style={{
-                  height: "100%", width: `${progressPct}%`,
-                  background: `linear-gradient(90deg, ${theme.accent}, ${theme.accent2})`,
-                  borderRadius: 2,
-                  boxShadow: `0 0 8px ${theme.accent}88`,
-                  transition: "width 0.1s",
-                }} />
+              {/* Track info */}
+              <div className="nw-track-info">
+                <div className="nw-track-name" style={{ color:th.text }}>
+                  {currentTrack?.name || currentTrack?.title || "NO TRACK LOADED"}
+                </div>
+                <div className="nw-track-artist" style={{ color:th.accent2 }}>{currentTrack?.artist || "—"}</div>
               </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: theme.muted, letterSpacing: 1 }}>
-                <span>{formatTime(progress)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
-            </div>
 
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
-              <button onClick={() => setShuffle(!shuffle)} className={`ctrl-btn ${shuffle ? "active" : ""}`} style={{
-                background: "none", border: "none", color: shuffle ? theme.accent : theme.muted,
-                cursor: "pointer", padding: 4,
-              }}>
-                <ShuffleIcon size={16} />
-              </button>
-              <button onClick={skipPrev} className="ctrl-btn" style={{
-                background: "none", border: "none", color: theme.text, cursor: "pointer", padding: 4,
-              }}>
-                <SkipPrev size={22} />
-              </button>
-              <button onClick={togglePlay} className="play-btn" style={{
-                width: 52, height: 52, borderRadius: "50%",
-                background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent2})`,
-                border: "none", color: "#fff", cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                boxShadow: theme.glow,
-                transition: "all 0.2s",
-              }}>
-                {isPlaying ? <PauseIcon size={22} /> : <PlayIcon size={22} />}
-              </button>
-              <button onClick={skipNext} className="ctrl-btn" style={{
-                background: "none", border: "none", color: theme.text, cursor: "pointer", padding: 4,
-              }}>
-                <SkipNext size={22} />
-              </button>
-              <button onClick={() => setRepeat(!repeat)} className={`ctrl-btn ${repeat ? "active" : ""}`} style={{
-                background: "none", border: "none", color: repeat ? theme.accent : theme.muted,
-                cursor: "pointer", padding: 4,
-              }}>
-                <RepeatIcon size={16} />
+              {/* Progress */}
+              <div>
+                <div onClick={seek} className="nw-progress-track" style={{ background:th.border, marginBottom:6 }}>
+                  <div style={{
+                    height:"100%", width:`${progressPct}%`,
+                    background:`linear-gradient(90deg, ${th.accent}, ${th.accent2})`,
+                    borderRadius:2, boxShadow:`0 0 8px ${th.accent}88`, transition:"width 0.1s",
+                  }} />
+                </div>
+                <div className="nw-progress-times" style={{ color:th.muted }}>
+                  <span>{formatTime(progress)}</span><span>{formatTime(duration)}</span>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <ControlBar />
+
+              {/* Volume */}
+              <div className="nw-volume-row">
+                <VolumeIcon size={14} />
+                <input type="range" min="0" max="1" step="0.01" value={volume}
+                  onChange={e => setVolume(parseFloat(e.target.value))} style={{ flex:1 }} />
+                <span style={{ fontSize:11, color:th.muted, minWidth:28, textAlign:"right" }}>{Math.round(volume*100)}</span>
+              </div>
+
+              {/* Visualizer */}
+              <div style={{ background:th.card, borderRadius:8, border:`1px solid ${th.border}`, padding:"8px 12px", overflow:"hidden" }}>
+                <Visualizer analyser={analyser} isPlaying={isPlaying} theme={th} />
+              </div>
+
+              {/* Queue + Playlist buttons */}
+              <div style={{ display:"flex", gap:8 }}>
+                <button className="nw-panel-btn" onClick={() => setPlaylistOpen(true)}
+                  style={{ flex:1, border:`1px solid ${th.border}`, color:th.muted, background:"transparent" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor=th.accent; e.currentTarget.style.color=th.accent; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor=th.border; e.currentTarget.style.color=th.muted; }}>
+                  ≡ LISTS
+                </button>
+                <button className="nw-panel-btn" onClick={() => setQueueOpen(true)}
+                  style={{ flex:1, border:`1px solid ${th.border}`, color:th.muted, background:"transparent", position:"relative" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor=th.accent; e.currentTarget.style.color=th.accent; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor=th.border; e.currentTarget.style.color=th.muted; }}>
+                  ♫ QUEUE
+                  {ctxQueue.length > 0 && <span className="nw-badge" style={{ background:th.accent, color:th.bg }}>{ctxQueue.length}</span>}
+                </button>
+              </div>
+
+              {/* Upload */}
+              <button onClick={() => fileInputRef.current.click()} className="upload-btn"
+                style={{ width:"100%", padding:"12px", borderRadius:8, border:`1px dashed ${th.border}`, background:"transparent", color:th.muted, fontFamily:"var(--font-body,'Rajdhani',sans-serif)", fontSize:13, fontWeight:600, cursor:"pointer", letterSpacing:1, textTransform:"uppercase", display:"flex", alignItems:"center", justifyContent:"center", gap:8, transition:"all 0.2s" }}>
+                <PlusIcon size={14} /> Add Music
               </button>
             </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <VolumeIcon size={14} />
-              <input
-                type="range" min="0" max="1" step="0.01"
-                value={volume}
-                onChange={(e) => setVolume(parseFloat(e.target.value))}
-                style={{ flex: 1 }}
-              />
-              <span style={{ fontSize: 11, color: theme.muted, minWidth: 28, textAlign: "right", letterSpacing: 1 }}>
-                {Math.round(volume * 100)}
-              </span>
-            </div>
-
-            <div style={{
-              background: theme.card, borderRadius: 8,
-              border: `1px solid ${theme.border}`,
-              padding: "8px 12px", overflow: "hidden",
-            }}>
-              <Visualizer analyser={analyser} isPlaying={isPlaying} theme={theme} />
-            </div>
-
-            <button onClick={() => fileInputRef.current.click()} className="upload-btn" style={{
-              width: "100%", padding: "12px", borderRadius: 8,
-              border: `1px dashed ${theme.border}`,
-              background: "transparent", color: theme.muted,
-              fontFamily: "'Rajdhani', sans-serif", fontSize: 13, fontWeight: 600,
-              cursor: "pointer", letterSpacing: 1, textTransform: "uppercase",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              transition: "all 0.2s",
-            }}>
-              <PlusIcon size={14} />
-              Add Music
-            </button>
           </div>
 
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-            <div style={{
-              padding: "16px 24px",
-              borderBottom: `1px solid ${theme.border}`,
-              display: "flex", alignItems: "center", gap: 12,
-              background: theme.surface,
-            }}>
-              <input
-                type="text"
-                placeholder="Search your library..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{
-                  flex: 1, padding: "8px 14px", borderRadius: 8,
-                  border: `1px solid ${theme.border}`,
-                  background: theme.card, color: theme.text,
-                  fontFamily: "'Rajdhani', sans-serif", fontSize: 14,
-                  outline: "none",
-                }}
-                onFocus={(e) => e.target.style.borderColor = theme.accent}
-                onBlur={(e) => e.target.style.borderColor = theme.border}
-              />
-              <div style={{ display: "flex", gap: 4 }}>
-                {[["list", <ListIcon size={16} />], ["grid", <GridIcon size={16} />]].map(([id, icon]) => (
-                  <button key={id} onClick={() => setGridView(id === "grid")} style={{
-                    width: 34, height: 34, borderRadius: 6,
-                    border: `1px solid ${(id === "grid") === gridView ? theme.accent : theme.border}`,
-                    background: (id === "grid") === gridView ? theme.accent + "22" : "transparent",
-                    color: (id === "grid") === gridView ? theme.accent : theme.muted,
-                    cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
+          {/* ── Main Content ─────────────────────────────────────────── */}
+          <div className="nw-main">
+            {/* Search + view toggle bar */}
+            <div className="nw-search-bar" style={{ borderBottom:`1px solid ${th.border}`, background:th.surface }}>
+              <input type="text" placeholder="Search your library..." value={search}
+                onChange={e => setSearch(e.target.value)} className="nw-search-input"
+                style={{ border:`1px solid ${th.border}`, background:th.card, color:th.text }}
+                onFocus={e => e.target.style.borderColor = th.accent}
+                onBlur={e => e.target.style.borderColor = th.border} />
+              <div style={{ display:"flex", gap:4 }}>
+                {[["list",<ListIcon size={16}/>],["grid",<GridIcon size={16}/>]].map(([id,icon]) => (
+                  <button key={id} onClick={() => setGridView(id==="grid")}
+                    style={{ width:34, height:34, borderRadius:6,
+                      border:`1px solid ${(id==="grid")===gridView ? th.accent : th.border}`,
+                      background:(id==="grid")===gridView ? th.accent+"22" : "transparent",
+                      color:(id==="grid")===gridView ? th.accent : th.muted,
+                      cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
                     {icon}
                   </button>
                 ))}
               </div>
-              <span style={{ fontSize: 12, color: theme.muted, letterSpacing: 1, whiteSpace: "nowrap" }}>
-                {library.length} TRACKS
-              </span>
+              <span className="nw-track-count" style={{ color:th.muted }}>{library.length} TRACKS</span>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-              {view === "library" && (
-                <div className="fadeIn">
-                  {library.length === 0 ? (
-                    <div style={{
-                      display: "flex", flexDirection: "column", alignItems: "center",
-                      justifyContent: "center", minHeight: 300, gap: 16,
-                      color: theme.muted,
-                    }}>
-                      <div style={{
-                        width: 80, height: 80, borderRadius: "50%",
-                        border: `2px dashed ${theme.border}`,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        <MusicIcon size={32} />
-                      </div>
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 14, color: theme.muted, letterSpacing: 2, marginBottom: 8 }}>
-                          YOUR LIBRARY IS EMPTY
-                        </div>
-                        <div style={{ fontSize: 13, color: theme.muted + "aa" }}>
-                          Drop audio files here or click Add Music
-                        </div>
-                      </div>
-                      <button onClick={() => fileInputRef.current.click()} style={{
-                        padding: "10px 24px", borderRadius: 8,
-                        background: `linear-gradient(135deg, ${theme.accent}33, ${theme.accent2}33)`,
-                        border: `1px solid ${theme.accent}66`,
-                        color: theme.accent, cursor: "pointer",
-                        fontFamily: "'Rajdhani', sans-serif", fontSize: 14, fontWeight: 600,
-                        letterSpacing: 1,
-                      }}>
-                        UPLOAD MUSIC
-                      </button>
-                    </div>
-                  ) : gridView ? (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 }}>
-                      {filtered.map((track, i) => (
-                        <div
-                          key={track.id}
-                          onClick={() => { setQueue(library); playTrack(library.indexOf(track)); }}
-                          style={{
-                            background: queue[currentIndex]?.id === track.id ? theme.accent + "18" : theme.card,
-                            border: `1px solid ${queue[currentIndex]?.id === track.id ? theme.accent + "66" : theme.border}`,
-                            borderRadius: 10, overflow: "hidden", cursor: "pointer",
-                            transition: "all 0.2s",
-                          }}
-                        >
-                          <AlbumArt song={track} theme={theme} size={150} />
-                          <div style={{ padding: "8px 10px" }}>
-                            <div style={{
-                              fontSize: 12, fontWeight: 600, color: theme.text,
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              marginBottom: 2,
-                            }}>
-                              {track.name}
-                            </div>
-                            <div style={{ fontSize: 11, color: theme.muted }}>{track.artist}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                      <thead>
-                        <tr style={{ borderBottom: `1px solid ${theme.border}` }}>
-                          {["#", "TITLE", "ARTIST", ""].map((h, i) => (
-                            <th key={i} style={{
-                              padding: "8px 12px", textAlign: "left",
-                              fontSize: 11, color: theme.muted, letterSpacing: 2, fontWeight: 600,
-                              width: i === 0 ? 40 : i === 3 ? 40 : "auto",
-                            }}>
-                              {h}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map((track, idx) => {
-                          const isActive = queue[currentIndex]?.id === track.id;
-                          return (
-                            <tr
-                              key={track.id}
-                              className={`track-row ${isActive ? "active" : ""}`}
-                              onClick={() => { setQueue(library); playTrack(library.indexOf(track)); }}
-                              style={{
-                                background: isActive ? theme.accent + "18" : "transparent",
-                                cursor: "pointer", transition: "background 0.15s",
-                                borderBottom: `1px solid ${theme.border}22`,
-                              }}
-                            >
-                              <td style={{ padding: "10px 12px", width: 40 }}>
-                                {isActive && isPlaying ? (
-                                  <div style={{
-                                    display: "flex", gap: 2, alignItems: "flex-end", height: 14,
-                                  }}>
-                                    {[1, 1.5, 0.8].map((delay, j) => (
-                                      <div key={j} style={{
-                                        width: 3, background: theme.accent, borderRadius: 1,
-                                        animation: `pulse ${delay}s ease-in-out infinite`,
-                                        height: [10, 14, 8][j],
-                                      }} />
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <span style={{ fontSize: 12, color: isActive ? theme.accent : theme.muted, letterSpacing: 1 }}>
-                                    {String(idx + 1).padStart(2, "0")}
-                                  </span>
-                                )}
-                              </td>
-                              <td style={{ padding: "10px 12px" }}>
-                                <span style={{ fontSize: 14, fontWeight: 500, color: isActive ? theme.accent : theme.text }}>
-                                  {track.name}
-                                </span>
-                              </td>
-                              <td style={{ padding: "10px 12px" }}>
-                                <span style={{ fontSize: 13, color: theme.muted }}>{track.artist}</span>
-                              </td>
-                              <td style={{ padding: "10px 12px", width: 40 }}>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); removeTrack(track.id); }}
-                                  style={{
-                                    background: "none", border: "none", color: theme.muted,
-                                    cursor: "pointer", opacity: 0.5, padding: 4,
-                                    transition: "all 0.15s",
-                                  }}
-                                  onMouseEnter={(e) => { e.currentTarget.style.color = theme.accent3; e.currentTarget.style.opacity = 1; }}
-                                  onMouseLeave={(e) => { e.currentTarget.style.color = theme.muted; e.currentTarget.style.opacity = 0.5; }}
-                                >
-                                  <TrashIcon size={14} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              )}
-
+            {/* Library / Queue content */}
+            <div className="nw-content-scroll">
+              {view === "library" && <TrackList />}
               {view === "queue" && (
                 <div className="fadeIn">
-                  {queue.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: 40, color: theme.muted }}>
-                      <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 2, marginBottom: 8 }}>
-                        QUEUE IS EMPTY
-                      </div>
-                      <div style={{ fontSize: 13 }}>Add tracks to your library to start playing</div>
+                  {ctxQueue.length === 0 ? (
+                    <div style={{ textAlign:"center", padding:40, color:th.muted }}>
+                      <div style={{ fontFamily:"var(--font-display,'Orbitron',monospace)", fontSize:13, letterSpacing:2, marginBottom:8 }}>QUEUE IS EMPTY</div>
+                      <div style={{ fontSize:13 }}>Add tracks to your library to start playing</div>
                     </div>
-                  ) : (
-                    queue.map((track, idx) => {
-                      const isActive = idx === currentIndex;
-                      return (
-                        <div
-                          key={track.id}
-                          onClick={() => playTrack(idx)}
-                          className={`track-row ${isActive ? "active" : ""}`}
-                          style={{
-                            display: "flex", alignItems: "center", gap: 12,
-                            padding: "10px 12px", borderRadius: 8,
-                            background: isActive ? theme.accent + "18" : "transparent",
-                            border: `1px solid ${isActive ? theme.accent + "44" : "transparent"}`,
-                            cursor: "pointer", marginBottom: 4, transition: "all 0.15s",
-                          }}
-                        >
-                          <div style={{
-                            width: 28, height: 28, borderRadius: 6,
-                            background: isActive ? theme.accent + "33" : theme.border,
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>
-                            {isActive && isPlaying ? (
-                              <div style={{ display: "flex", gap: 1.5, alignItems: "flex-end", height: 12 }}>
-                                {[1, 1.5, 0.8].map((d, j) => (
-                                  <div key={j} style={{
-                                    width: 2.5, background: theme.accent, borderRadius: 1,
-                                    animation: `pulse ${d}s ease-in-out infinite`,
-                                    height: [8, 12, 6][j],
-                                  }} />
-                                ))}
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: 10, color: isActive ? theme.accent : theme.muted, letterSpacing: 1 }}>
-                                {String(idx + 1).padStart(2, "0")}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{
-                              fontSize: 14, fontWeight: 500,
-                              color: isActive ? theme.accent : theme.text,
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                            }}>
-                              {track.name}
-                            </div>
-                            <div style={{ fontSize: 12, color: theme.muted }}>{track.artist}</div>
-                          </div>
-                          {isActive && (
-                            <div style={{
-                              fontSize: 10, color: theme.accent, letterSpacing: 2,
-                              fontFamily: "'Orbitron', monospace",
-                            }}>
-                              NOW PLAYING
-                            </div>
-                          )}
+                  ) : ctxQueue.map((track, idx) => {
+                    const isActive = idx === queueIndex;
+                    return (
+                      <div key={track.id+idx} onClick={() => playTrack(idx)} className={`track-row ${isActive?"active":""}`}
+                        style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 12px", borderRadius:8, background:isActive ? th.accent+"18" : "transparent", border:`1px solid ${isActive?th.accent+"44":"transparent"}`, cursor:"pointer", marginBottom:4, transition:"all 0.15s" }}>
+                        <div style={{ width:28, height:28, borderRadius:6, background:isActive?th.accent+"33":th.border, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                          {isActive && isPlaying
+                            ? <div style={{ display:"flex", gap:1.5, alignItems:"flex-end", height:12 }}>{[1,1.5,0.8].map((d,j)=><div key={j} style={{ width:2.5, background:th.accent, borderRadius:1, animation:`pulse ${d}s ease-in-out infinite`, height:[8,12,6][j] }}/>)}</div>
+                            : <span style={{ fontSize:10, color:isActive?th.accent:th.muted, letterSpacing:1 }}>{String(idx+1).padStart(2,"0")}</span>}
                         </div>
-                      );
-                    })
-                  )}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontSize:14, fontWeight:500, color:isActive?th.accent:th.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{track.name||track.title}</div>
+                          <div style={{ fontSize:12, color:th.muted }}>{track.artist}</div>
+                        </div>
+                        {isActive && <div style={{ fontSize:10, color:th.accent, letterSpacing:2, fontFamily:"var(--font-display,monospace)" }}>NOW PLAYING</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        <div style={{
-          position: "fixed", bottom: 20, right: 20,
-          background: theme.card,
-          border: `1px solid ${theme.border}`,
-          borderRadius: 8, padding: "8px 14px",
-          fontSize: 11, color: theme.muted, letterSpacing: 1,
-          fontFamily: "'Rajdhani', sans-serif",
-          pointerEvents: "none",
-        }}>
+        {/* ── Mobile bottom mini-player bar ──────────────────────────── */}
+        <div className="nw-mobile-bar" style={{ background:th.surface, borderTop:`1px solid ${th.border}` }}
+          onClick={() => setMobilePlayerOpen(true)}>
+          {/* Mini art */}
+          <div className="nw-mob-mini-art" style={{ borderRadius:8, overflow:"hidden", boxShadow: currentTrack ? th.glow : "none" }}>
+            <AlbumArt song={currentTrack} theme={th} size={46} />
+          </div>
+          {/* Track info + progress */}
+          <div className="nw-mob-mini-info">
+            <div className="nw-mob-mini-title" style={{ color: currentTrack ? th.text : th.muted }}>
+              {currentTrack?.name || currentTrack?.title || "No track"}
+            </div>
+            <div className="nw-mob-mini-artist" style={{ color:th.muted }}>{currentTrack?.artist || "—"}</div>
+            {/* Thin progress line */}
+            <div style={{ height:2, background:th.border, borderRadius:1, marginTop:4, overflow:"hidden" }}>
+              <div style={{ height:"100%", width:`${progressPct}%`, background:`linear-gradient(90deg,${th.accent},${th.accent2})`, transition:"width 0.1s" }} />
+            </div>
+          </div>
+          {/* Quick controls */}
+          <div className="nw-mob-mini-controls" onClick={e => e.stopPropagation()}>
+            <button onClick={doSkipPrev} className="ctrl-btn"
+              style={{ background:"none", border:"none", color:th.text, cursor:"pointer", padding:6 }}>
+              <SkipPrev size={20} />
+            </button>
+            <button onClick={togglePlay} className="play-btn"
+              style={{ width:38, height:38, borderRadius:"50%", background:`linear-gradient(135deg,${th.accent},${th.accent2})`, border:"none", color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", boxShadow:th.glow }}>
+              {isPlaying ? <PauseIcon size={18}/> : <PlayIcon size={18}/>}
+            </button>
+            <button onClick={doSkipNext} className="ctrl-btn"
+              style={{ background:"none", border:"none", color:th.text, cursor:"pointer", padding:6 }}>
+              <SkipNext size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Drop hint (desktop only) */}
+        <div className="nw-drop-hint"
+          style={{ background:th.card, border:`1px solid ${th.border}`, color:th.muted }}>
           DROP AUDIO FILES ANYWHERE
         </div>
       </div>
