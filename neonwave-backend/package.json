@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "db:setup": "node scripts/setup-db.js"
+    "db:setup": "node script/setup-db.js",
+    "test:recs-smoke": "node script/smoke-recommendations.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.620.0",

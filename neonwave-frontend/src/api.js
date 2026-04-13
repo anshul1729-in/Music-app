@@ -74,10 +74,18 @@ export const api = {
   getArtists: () => request("/api/artists"),
   getAlbums:  () => request("/api/albums"),
   getStats:   () => request("/api/stats"),
+  getListeningHistory: (limit = 30) => request(`/api/me/history?limit=${limit}`),
+  getTopTracks: (limit = 12) => request(`/api/me/top-tracks?limit=${limit}`),
+  getTopArtists: (limit = 10) => request(`/api/me/top-artists?limit=${limit}`),
+  sendPlaybackEvent: (payload) => request("/api/events/playback", { method: "POST", body: JSON.stringify(payload) }),
+  getForYouRecommendations: (limit = 10) => request(`/api/recommendations/for-you?limit=${limit}`),
+  getSimilarRecommendations: (trackId, limit = 8) => request(`/api/recommendations/similar/${trackId}?limit=${limit}`),
+  getDiscoverRecommendations: (limit = 10) => request(`/api/recommendations/discover?limit=${limit}`),
 
   // ─── Playlists ────────────────────────────────────────────────────────
   getPlaylists:         ()              => request("/api/playlists"),
   createPlaylist:       (name, desc)    => request("/api/playlists", { method: "POST", body: JSON.stringify({ name, description: desc }) }),
+  updatePlaylist:       (id, payload)   => request(`/api/playlists/${id}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deletePlaylist:       (id)            => request(`/api/playlists/${id}`, { method: "DELETE" }),
   getPlaylistTracks:    (id)            => request(`/api/playlists/${id}/tracks`),
   addTrackToPlaylist:   (id, track_id)  => request(`/api/playlists/${id}/tracks`, { method: "POST", body: JSON.stringify({ track_id }) }),

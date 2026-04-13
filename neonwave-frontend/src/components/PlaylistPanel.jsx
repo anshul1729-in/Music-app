@@ -129,10 +129,130 @@ function CreateModal({ onClose, onCreate }) {
   );
 }
 
+function EditModal({ playlist, onClose, onSave }) {
+  const [name, setName] = useState(playlist.name || "");
+  const [desc, setDesc] = useState(playlist.description || "");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    setLoading(true);
+    try {
+      const updated = await api.updatePlaylist(playlist.id, {
+        name: name.trim(),
+        description: desc.trim() || null,
+      });
+      onSave(updated);
+      onClose();
+    } catch (e) {
+      alert("Failed to update playlist: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 299 }} />
+      <div style={{
+        position: "fixed",
+        top: "50%", left: "50%",
+        transform: "translate(-50%,-50%)",
+        zIndex: 300,
+        background: "var(--bg2)",
+        border: "1px solid var(--border-hover)",
+        borderRadius: "18px",
+        padding: "32px",
+        width: "min(400px, 90vw)",
+        boxShadow: "0 30px 80px rgba(0,0,0,0.7), var(--glow)",
+        animation: "scaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)",
+      }}>
+        <h3 style={{
+          fontFamily: "var(--font-display)", fontSize: "16px",
+          letterSpacing: "3px", color: "var(--text-bright)",
+          marginBottom: "24px",
+        }}>EDIT PLAYLIST</h3>
+
+        <label style={{ display: "block", marginBottom: "16px" }}>
+          <div style={{ fontFamily: "var(--font-body)", fontSize: "11px", letterSpacing: "2px", color: "var(--text-dim)", marginBottom: "6px", textTransform: "uppercase" }}>Name</div>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && submit()}
+            autoFocus
+            placeholder="Playlist name..."
+            style={{
+              width: "100%",
+              background: "var(--bg3)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              padding: "10px 14px",
+              color: "var(--text-bright)",
+              fontFamily: "var(--font-body)",
+              fontSize: "15px",
+              outline: "none",
+              transition: "border-color 0.2s",
+              boxSizing: "border-box",
+            }}
+            onFocus={e => e.target.style.borderColor = "var(--accent)"}
+            onBlur={e => e.target.style.borderColor = "var(--border)"}
+          />
+        </label>
+
+        <label style={{ display: "block", marginBottom: "28px" }}>
+          <div style={{ fontFamily: "var(--font-body)", fontSize: "11px", letterSpacing: "2px", color: "var(--text-dim)", marginBottom: "6px", textTransform: "uppercase" }}>Description (optional)</div>
+          <input
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            placeholder="Playlist description..."
+            style={{
+              width: "100%",
+              background: "var(--bg3)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              padding: "10px 14px",
+              color: "var(--text-bright)",
+              fontFamily: "var(--font-body)",
+              fontSize: "14px",
+              outline: "none",
+              transition: "border-color 0.2s",
+              boxSizing: "border-box",
+            }}
+            onFocus={e => e.target.style.borderColor = "var(--accent)"}
+            onBlur={e => e.target.style.borderColor = "var(--border)"}
+          />
+        </label>
+
+        <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{
+            background: "none", border: "1px solid var(--border)",
+            borderRadius: "8px", padding: "10px 20px",
+            color: "var(--text-dim)", fontFamily: "var(--font-display)",
+            fontSize: "11px", letterSpacing: "2px", cursor: "pointer",
+          }}>CANCEL</button>
+          <button
+            onClick={submit}
+            disabled={!name.trim() || loading}
+            style={{
+              background: "var(--accent)", border: "none",
+              borderRadius: "8px", padding: "10px 24px",
+              color: "var(--bg)", fontFamily: "var(--font-display)",
+              fontSize: "11px", letterSpacing: "2px", cursor: "pointer",
+              opacity: name.trim() ? 1 : 0.4,
+              fontWeight: 700,
+            }}
+          >{loading ? "SAVING..." : "SAVE"}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Playlist Detail View ────────────────────────────────────────────────────
-function PlaylistDetail({ playlist, onBack, onDelete }) {
+function PlaylistDetail({ playlist, onBack, onDelete, onUpdate }) {
   const [tracks, setTracks]   = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
   const { loadQueue, addToQueue, playNext: playNextInQueue } = useQueue();
 
   useEffect(() => {
@@ -194,6 +314,10 @@ function PlaylistDetail({ playlist, onBack, onDelete }) {
             onClick={() => addToQueue(tracks)}
             style={actionBtnStyle("transparent", "var(--accent)", "var(--border)")}
           >+ ADD TO QUEUE</button>
+          <button
+            onClick={() => setEditing(true)}
+            style={actionBtnStyle("transparent", "var(--text)", "var(--border)")}
+          >✎ EDIT</button>
           <button
             onClick={() => {
               if (confirm(`Delete "${playlist.name}"?`)) onDelete(playlist.id);
@@ -259,6 +383,13 @@ function PlaylistDetail({ playlist, onBack, onDelete }) {
           </div>
         ))}
       </div>
+      {editing && (
+        <EditModal
+          playlist={playlist}
+          onClose={() => setEditing(false)}
+          onSave={onUpdate}
+        />
+      )}
     </div>
   );
 }
@@ -289,6 +420,12 @@ export default function PlaylistPanel({ currentTrack }) {
       setSelected(null);
     } catch (e) { alert("Failed to delete"); }
   };
+
+  const handleUpdate = useCallback((updatedPlaylist) => {
+    setPlaylists(prev =>
+      prev.map(pl => (pl.id === updatedPlaylist.id ? { ...pl, ...updatedPlaylist } : pl))
+    );
+  }, []);
 
   const addCurrentTrack = async (playlistId) => {
     if (!currentTrack) return;
@@ -324,6 +461,7 @@ export default function PlaylistPanel({ currentTrack }) {
             playlist={selectedPlaylist}
             onBack={() => setSelected(null)}
             onDelete={handleDelete}
+            onUpdate={handleUpdate}
           />
         ) : (
           <>
