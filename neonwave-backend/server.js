@@ -9,6 +9,9 @@ import * as mm from "music-metadata";
 import { Readable } from "stream";
 import crypto from "crypto";
 import path from "path";
+import { createRecommendationService } from "./src/recommendationService.js";
+import { registerPersonalizationRoutes } from "./src/routes/personalizationRoutes.js";
+import { registerRecommendationRoutes } from "./src/routes/recommendationRoutes.js";
 
 dotenv.config();
 
@@ -42,6 +45,61 @@ const BUCKET = process.env.R2_BUCKET_NAME;
 
 // ─── PostgreSQL Client ────────────────────────────────────────
 const db = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const recommendationService = createRecommendationService({ db });
+const DEFAULT_USERNAME = process.env.DEFAULT_USERNAME || "default-user";
+let defaultUserIdPromise = null;
+
+async function getDefaultUserId() {
+  if (!defaultUserIdPromise) {
+    defaultUserIdPromise = (async () => {
+      const existing = await db.query(`SELECT id FROM users WHERE username = $1 LIMIT 1`, [DEFAULT_USERNAME]);
+      if (existing.rows.length) return existing.rows[0].id;
+      const created = await db.query(
+        `INSERT INTO users (username, display_name) VALUES ($1, $2) RETURNING id`,
+        [DEFAULT_USERNAME, "Default User"]
+      );
+      return created.rows[0].id;
+    })().catch((err) => {
+      defaultUserIdPromise = null;
+      throw err;
+    });
+  }
+  return defaultUserIdPromise;
+}
+
+async function updateAffinities({ userId, trackId, eventType }) {
+  const trackRes = await db.query(`SELECT artist FROM tracks WHERE id = $1`, [trackId]);
+  if (!trackRes.rows.length) return;
+  const artist = trackRes.rows[0].artist || "Unknown Artist";
+
+  const playDelta = eventType === "play_complete" ? 1 : eventType === "play_start" ? 1 : 0;
+  const skipDelta = eventType === "skip" ? 1 : 0;
+  const scoreDelta = eventType === "play_complete" ? 2 : eventType === "play_start" ? 0.5 : eventType === "skip" ? -1 : 0;
+
+  await db.query(
+    `INSERT INTO user_track_affinity (user_id, track_id, affinity_score, play_count, skip_count)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, track_id)
+     DO UPDATE SET
+      affinity_score = user_track_affinity.affinity_score + EXCLUDED.affinity_score,
+      play_count = user_track_affinity.play_count + EXCLUDED.play_count,
+      skip_count = user_track_affinity.skip_count + EXCLUDED.skip_count,
+      updated_at = NOW()`,
+    [userId, trackId, scoreDelta, playDelta, skipDelta]
+  );
+
+  await db.query(
+    `INSERT INTO user_artist_affinity (user_id, artist, affinity_score, play_count, skip_count)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, artist)
+     DO UPDATE SET
+      affinity_score = user_artist_affinity.affinity_score + EXCLUDED.affinity_score,
+      play_count = user_artist_affinity.play_count + EXCLUDED.play_count,
+      skip_count = user_artist_affinity.skip_count + EXCLUDED.skip_count,
+      updated_at = NOW()`,
+    [userId, artist, scoreDelta, playDelta, skipDelta]
+  );
+}
 
 // ─── Multer (in-memory, 200MB limit) ─────────────────────────
 const upload = multer({
@@ -55,6 +113,9 @@ const upload = multer({
 
 // ─── Health Check ─────────────────────────────────────────────
 app.get("/health", (_, res) => res.json({ status: "ok", service: "NeonWave API" }));
+registerPersonalizationRoutes(app, { authenticate, db, getDefaultUserId, updateAffinities });
+
+registerRecommendationRoutes(app, { authenticate, getDefaultUserId, recommendationService });
 
 // ─── UPLOAD TRACK ─────────────────────────────────────────────
 app.post("/api/tracks/upload", authenticate, upload.single("file"), async (req, res) => {
@@ -296,6 +357,28 @@ app.post("/api/playlists", authenticate, async (req, res) => {
     res.status(201).json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: "Failed to create playlist" });
+  }
+});
+
+app.patch("/api/playlists/:id", authenticate, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (typeof name !== "string" || !name.trim()) {
+      return res.status(400).json({ error: "Name required" });
+    }
+
+    const result = await db.query(
+      `UPDATE playlists
+       SET name = $1, description = $2
+       WHERE id = $3
+       RETURNING *`,
+      [name.trim(), description?.trim() || null, req.params.id]
+    );
+
+    if (!result.rows.length) return res.status(404).json({ error: "Playlist not found" });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update playlist" });
   }
 });
 

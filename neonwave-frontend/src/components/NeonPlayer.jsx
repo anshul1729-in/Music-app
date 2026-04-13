@@ -64,6 +64,12 @@ export default function NeonPlayer() {
   const [search, setSearch]           = useState("");
   const [analyser, setAnalyser]       = useState(null);
   const [mobilePlayerOpen, setMobilePlayerOpen] = useState(false);
+  const [topTracks, setTopTracks]     = useState([]);
+  const [topTracksLoading, setTopTracksLoading] = useState(false);
+  const [forYouTracks, setForYouTracks] = useState([]);
+  const [discoverTracks, setDiscoverTracks] = useState([]);
+  const [similarTracks, setSimilarTracks] = useState([]);
+  const [recsLoading, setRecsLoading] = useState(false);
 
   const audioRef    = useRef(null);
   const audioCtxRef = useRef(null);
@@ -71,6 +77,59 @@ export default function NeonPlayer() {
   const analyserRef = useRef(null);
   const fileInputRef = useRef(null);
   const dropRef      = useRef(null);
+  const reportedStartTrackRef = useRef(null);
+  const lastProgressReportRef = useRef(0);
+
+  const fetchTopTracks = useCallback(async () => {
+    setTopTracksLoading(true);
+    try {
+      const rows = await api.getTopTracks(10);
+      setTopTracks(Array.isArray(rows) ? rows : []);
+    } catch (e) {
+      console.error("Top tracks fetch error", e);
+      setTopTracks([]);
+    } finally {
+      setTopTracksLoading(false);
+    }
+  }, []);
+
+  const fetchPersonalizedRows = useCallback(async () => {
+    setRecsLoading(true);
+    try {
+      const [forYouRes, discoverRes] = await Promise.all([
+        api.getForYouRecommendations(8),
+        api.getDiscoverRecommendations(8),
+      ]);
+      setForYouTracks(Array.isArray(forYouRes?.tracks) ? forYouRes.tracks : []);
+      setDiscoverTracks(Array.isArray(discoverRes?.tracks) ? discoverRes.tracks : []);
+    } catch (e) {
+      console.error("Recommendations fetch error", e);
+      setForYouTracks([]);
+      setDiscoverTracks([]);
+    } finally {
+      setRecsLoading(false);
+    }
+  }, []);
+
+  const sendPlaybackEvent = useCallback(async (eventType, track, audio, source = view) => {
+    if (!track?.id) return;
+    const durationSeconds = Math.round(audio?.duration || track.duration || 0);
+    const positionSeconds = Math.round(audio?.currentTime || 0);
+    const ratio = durationSeconds > 0 ? Math.min(1, Math.max(0, positionSeconds / durationSeconds)) : 0;
+
+    try {
+      await api.sendPlaybackEvent({
+        track_id: track.id,
+        event_type: eventType,
+        position_seconds: positionSeconds,
+        duration_seconds: durationSeconds,
+        completion_ratio: ratio,
+        source,
+      });
+    } catch (e) {
+      console.error("Playback event failed", e);
+    }
+  }, [view]);
 
   // ── Audio Context ─────────────────────────────────────────────────────────
   const setupAudioContext = useCallback((audio) => {
@@ -139,10 +198,13 @@ export default function NeonPlayer() {
     audio.play().then(() => setIsPlaying(true)).catch(() => {});
   };
 
-  const doSkipNext = () => {
+  const doSkipNext = (reason = "skip") => {
+    const audio = audioRef.current;
+    if (reason === "skip" && currentTrack && audio) {
+      sendPlaybackEvent("skip", currentTrack, audio);
+    }
     const result = goToNext();
     if (!result) return;
-    const audio = audioRef.current;
     const track = result.track;
     if (!track || !audio) return;
     audio.src = api.getStreamUrl(track.id);
@@ -157,6 +219,9 @@ export default function NeonPlayer() {
   const doSkipPrev = () => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) { audio.currentTime = 0; return; }
+    if (currentTrack && audio) {
+      sendPlaybackEvent("skip", currentTrack, audio);
+    }
     const result = goToPrev();
     if (!result) return;
     const track = result.track;
@@ -176,7 +241,22 @@ export default function NeonPlayer() {
       setLibrary(mapped);
       loadQueue(mapped, 0);
     }).catch(console.error);
-  }, []);
+    fetchTopTracks();
+    fetchPersonalizedRows();
+  }, [fetchTopTracks, fetchPersonalizedRows]);
+
+  useEffect(() => {
+    if (!currentTrack?.id) {
+      setSimilarTracks([]);
+      return;
+    }
+    api.getSimilarRecommendations(currentTrack.id, 6)
+      .then((res) => setSimilarTracks(Array.isArray(res?.tracks) ? res.tracks : []))
+      .catch((e) => {
+        console.error("Similar recommendations error", e);
+        setSimilarTracks([]);
+      });
+  }, [currentTrack?.id]);
 
   const handleFiles = async (files) => {
     const audioFiles = Array.from(files).filter(f => f.type.startsWith("audio/"));
@@ -207,22 +287,47 @@ export default function NeonPlayer() {
     if (!audio) return;
     const onTime     = () => setProgress(audio.currentTime);
     const onDuration = () => setDuration(audio.duration);
-    const onEnded    = () => doSkipNext();
-    const onPlay     = () => setIsPlaying(true);
+    const onEnded    = () => {
+      if (currentTrack) {
+        sendPlaybackEvent("play_complete", currentTrack, audio).then(() => {
+          fetchTopTracks();
+          fetchPersonalizedRows();
+        });
+      }
+      doSkipNext("ended");
+    };
+    const onPlay     = () => {
+      setIsPlaying(true);
+      if (currentTrack?.id && reportedStartTrackRef.current !== currentTrack.id) {
+        reportedStartTrackRef.current = currentTrack.id;
+        sendPlaybackEvent("play_start", currentTrack, audio);
+      }
+    };
     const onPause    = () => setIsPlaying(false);
+    const onProgressReport = () => {
+      if (!currentTrack?.id || !audio.duration || audio.duration < 30) return;
+      const now = Date.now();
+      if (now - lastProgressReportRef.current < 15000) return;
+      const ratio = audio.currentTime / audio.duration;
+      if (ratio < 0.25 || ratio > 0.95) return;
+      lastProgressReportRef.current = now;
+      sendPlaybackEvent("play_progress", currentTrack, audio);
+    };
     audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("timeupdate", onProgressReport);
     audio.addEventListener("loadedmetadata", onDuration);
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
     return () => {
       audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("timeupdate", onProgressReport);
       audio.removeEventListener("loadedmetadata", onDuration);
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
     };
-  }, [queueIndex, repeat, shuffled]);
+  }, [queueIndex, repeat, shuffled, currentTrack, sendPlaybackEvent, fetchTopTracks, fetchPersonalizedRows]);
 
   const seek = (e) => {
     const audio = audioRef.current;
@@ -249,6 +354,129 @@ export default function NeonPlayer() {
     (t.artist||"").toLowerCase().includes(search.toLowerCase())
   );
   const progressPct = duration > 0 ? (progress / duration) * 100 : 0;
+
+  const TopTracksSection = () => (
+    <div style={{
+      background: th.surface,
+      border: `1px solid ${th.border}`,
+      borderRadius: 10,
+      padding: "14px",
+      marginBottom: "14px",
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: "10px",
+      }}>
+        <div style={{ fontFamily: "var(--font-display)", letterSpacing: 2, fontSize: 12, color: th.accent }}>
+          FOR YOU · TOP TRACKS
+        </div>
+        <button
+          onClick={fetchTopTracks}
+          style={{
+            background: "transparent",
+            border: `1px solid ${th.border}`,
+            borderRadius: 6,
+            color: th.muted,
+            fontSize: 11,
+            padding: "4px 8px",
+            cursor: "pointer",
+          }}
+        >
+          Refresh
+        </button>
+      </div>
+      {topTracksLoading ? (
+        <div style={{ color: th.muted, fontSize: 12 }}>Loading personalized picks...</div>
+      ) : topTracks.length === 0 ? (
+        <div style={{ color: th.muted, fontSize: 12 }}>Play more songs to generate your personalized Top Tracks.</div>
+      ) : (
+        topTracks.slice(0, 5).map((track, idx) => (
+          <div
+            key={`top-${track.id}-${idx}`}
+            onClick={() => {
+              const inLibraryIdx = library.findIndex(t => t.id === track.id);
+              if (inLibraryIdx >= 0) {
+                loadQueue(library, inLibraryIdx);
+                setIsPlaying(true);
+              }
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 6px",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ color: th.muted, width: 18, textAlign: "right", fontSize: 11 }}>{idx + 1}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: th.text, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {track.title}
+              </div>
+              <div style={{ color: th.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {track.artist}
+              </div>
+            </div>
+            <span style={{ color: th.accent2, fontSize: 11 }}>#{Number(track.score || 0).toFixed(2)}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  const playRecommendation = (trackId) => {
+    const inLibraryIdx = library.findIndex(t => t.id === trackId);
+    if (inLibraryIdx >= 0) {
+      loadQueue(library, inLibraryIdx);
+      setIsPlaying(true);
+    }
+  };
+
+  const RecommendationSection = ({ title, tracks, emptyText }) => (
+    <div style={{
+      background: th.surface,
+      border: `1px solid ${th.border}`,
+      borderRadius: 10,
+      padding: "14px",
+      marginBottom: "14px",
+    }}>
+      <div style={{ fontFamily: "var(--font-display)", letterSpacing: 2, fontSize: 12, color: th.accent, marginBottom: "10px" }}>
+        {title}
+      </div>
+      {tracks.length === 0 ? (
+        <div style={{ color: th.muted, fontSize: 12 }}>{emptyText}</div>
+      ) : (
+        tracks.slice(0, 5).map((track, idx) => (
+          <div
+            key={`${title}-${track.id}-${idx}`}
+            onClick={() => playRecommendation(track.id)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 6px",
+              borderRadius: 8,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ color: th.muted, width: 18, textAlign: "right", fontSize: 11 }}>{idx + 1}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: th.text, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {track.title}
+              </div>
+              <div style={{ color: th.muted, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {track.artist}
+              </div>
+            </div>
+            <span style={{ color: th.accent2, fontSize: 11 }}>#{Number(track.score || 0).toFixed(2)}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
   // ── Shared control bar (used in sidebar and mobile expanded view) ─────────
   const ControlBar = ({ compact = false }) => (
@@ -599,7 +827,30 @@ export default function NeonPlayer() {
 
             {/* Library / Queue content */}
             <div className="nw-content-scroll">
-              {view === "library" && <TrackList />}
+              {view === "library" && (
+                <>
+                  {recsLoading && (
+                    <div style={{ color: th.muted, fontSize: 12, marginBottom: 10 }}>Refreshing recommendations...</div>
+                  )}
+                  <TopTracksSection />
+                  <RecommendationSection
+                    title="FOR YOU"
+                    tracks={forYouTracks}
+                    emptyText="No For You picks yet. Keep listening to tune your profile."
+                  />
+                  <RecommendationSection
+                    title={currentTrack ? `BECAUSE YOU PLAYED ${currentTrack.title.toUpperCase()}` : "BECAUSE YOU PLAYED"}
+                    tracks={similarTracks}
+                    emptyText={currentTrack ? "Play a few more songs to get stronger similarity picks." : "Start playing music to unlock similar tracks."}
+                  />
+                  <RecommendationSection
+                    title="DISCOVER"
+                    tracks={discoverTracks}
+                    emptyText="No discovery results yet."
+                  />
+                  <TrackList />
+                </>
+              )}
               {view === "queue" && (
                 <div className="fadeIn">
                   {ctxQueue.length === 0 ? (
